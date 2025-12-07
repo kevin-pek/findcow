@@ -266,8 +266,8 @@ export default function WordSearchGame() {
   const isDisabled = gameState === "idle";
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-4 select-none">
-      <div className="w-full max-w-md">
+    <div className="flex flex-col items-center justify-center min-h-[100dvh] p-4 select-none">
+      <div className="w-full max-w-md flex flex-col">
         {/* Top Ad - visible on idle/start screen */}
         {gameState === "idle" && (
           <div className="mb-4">
@@ -378,12 +378,12 @@ export default function WordSearchGame() {
         {/* Ad after winning */}
         {gameState === "won" && (
           <div className="mt-6">
-            <AdUnit format="rectangle" className="min-h-[250px]" />
+            <AdUnit format="rectangle" />
           </div>
         )}
 
         {/* Footer */}
-        <div className="text-center mt-8 text-xs text-gray-500 dark:text-gray-500">
+        <div className="text-center mt-6 text-xs text-gray-500 dark:text-gray-500">
           <p>New puzzle every day at midnight</p>
         </div>
       </div>
