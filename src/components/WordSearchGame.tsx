@@ -266,7 +266,7 @@ export default function WordSearchGame() {
   const isDisabled = gameState === "idle";
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-4 select-none">
+    <div className="flex flex-col items-center justify-center h-auto p-4 select-none">
       <div className="w-full max-w-md">
         {/* Top Ad - visible on idle/start screen */}
         {gameState === "idle" && (
