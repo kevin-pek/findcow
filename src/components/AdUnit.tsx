@@ -35,8 +35,8 @@ export default function AdUnit({
     }
   }, []);
 
-  // Don't render in development
-  if (process.env.NODE_ENV !== "production") {
+  // Don't render on localhost
+  if (typeof window !== "undefined" && window.location.hostname === "localhost") {
     return null;
   }
 

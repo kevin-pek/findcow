@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/react";
+import AdSenseScript from "@/components/AdSenseScript";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -85,14 +86,6 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        {/* Google AdSense - only load in production */}
-        {process.env.NODE_ENV === "production" && (
-          <script
-            async
-            src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4636465145072045"
-            crossOrigin="anonymous"
-          />
-        )}
         {/* Structured Data for SEO */}
         <script
           type="application/ld+json"
@@ -125,6 +118,8 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         {children}
+        {/* Google AdSense - only loads on production domain */}
+        <AdSenseScript />
         {/* Vercel Analytics */}
         <Analytics />
       </body>
