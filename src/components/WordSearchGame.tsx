@@ -375,15 +375,8 @@ export default function WordSearchGame() {
           </button>
         )}
 
-        {/* Ad after winning */}
-        {gameState === "won" && (
-          <div className="mt-6">
-            <AdUnit format="rectangle" />
-          </div>
-        )}
-
         {/* Footer */}
-        <div className="text-center mt-6 text-xs text-gray-500 dark:text-gray-500">
+        <div className="text-center mt-4 text-xs text-gray-500 dark:text-gray-500">
           <p>New puzzle every day at midnight</p>
         </div>
       </div>

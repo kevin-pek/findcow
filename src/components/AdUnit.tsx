@@ -14,17 +14,18 @@ declare global {
   }
 }
 
+const ADSENSE_ID = "ca-pub-4636465145072045";
+
 export default function AdUnit({
   format = "auto",
   responsive = true,
   className = "",
 }: AdUnitProps) {
-  const adsenseId = process.env.NEXT_PUBLIC_ADSENSE_ID;
   const adRef = useRef<HTMLModElement>(null);
   const isAdLoaded = useRef(false);
 
   useEffect(() => {
-    if (adsenseId && typeof window !== "undefined" && !isAdLoaded.current) {
+    if (typeof window !== "undefined" && !isAdLoaded.current) {
       try {
         (window.adsbygoogle = window.adsbygoogle || []).push({});
         isAdLoaded.current = true;
@@ -32,10 +33,10 @@ export default function AdUnit({
         console.error("AdSense error:", err);
       }
     }
-  }, [adsenseId]);
+  }, []);
 
-  // Don't render anything if no AdSense ID configured
-  if (!adsenseId) {
+  // Don't render in development
+  if (process.env.NODE_ENV !== "production") {
     return null;
   }
 
@@ -45,7 +46,7 @@ export default function AdUnit({
         ref={adRef}
         className="adsbygoogle"
         style={{ display: "block" }}
-        data-ad-client={adsenseId}
+        data-ad-client={ADSENSE_ID}
         data-ad-format={format}
         data-full-width-responsive={responsive ? "true" : "false"}
       />
