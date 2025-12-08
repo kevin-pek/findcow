@@ -297,7 +297,27 @@ export default function WordSearchGame() {
         {/* Instructions */}
         <div className="text-center mb-4 text-sm text-gray-600 dark:text-gray-400">
           {gameState === "idle" ? (
-            <p>Press Start to begin the challenge</p>
+            <div className="space-y-3 text-left bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
+              <p className="font-semibold text-center text-base">How to Play</p>
+              <ul className="space-y-2">
+                <li className="flex items-start gap-2">
+                  <span>1.</span>
+                  <span>Find the word <strong>COW</strong> hidden in the grid</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span>2.</span>
+                  <span>Click and drag across 3 letters to select</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span>3.</span>
+                  <span>COW can be horizontal, vertical, or diagonal</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span>4.</span>
+                  <span>Complete it as fast as you can!</span>
+                </li>
+              </ul>
+            </div>
           ) : gameState === "playing" ? (
             <p>Drag to find the one hidden COW in the grid</p>
           ) : (
