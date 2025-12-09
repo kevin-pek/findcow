@@ -319,10 +319,13 @@ export function generatePuzzle(dateStr: string, size: number = 6): Puzzle {
   throw new Error(`Could not generate valid puzzle for date: ${dateStr}`);
 }
 
-// Get today's date string in YYYY-MM-DD format
+// Get today's date string in YYYY-MM-DD format (local timezone)
 export function getTodayDateStr(): string {
   const now = new Date();
-  return now.toISOString().split("T")[0];
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 // Verify a puzzle is valid (has exactly one COW and hash matches)
