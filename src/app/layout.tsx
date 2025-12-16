@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Find the COW - Daily Word Search Puzzle Game",
   description:
-    "Play Find the COW, a free daily word search puzzle! Find the one hidden COW in a grid of C, O, and W letters. New brain teaser every day - challenge your friends and share your score!",
+    "Can you find COW in under 10 seconds? Play the viral daily word search puzzle challenging thousands. One hidden COW, one grid, new puzzle every midnight. Free to play - share your score!",
   keywords: [
     "word search",
     "puzzle game",
@@ -30,10 +30,26 @@ export const metadata: Metadata = {
     "daily challenge",
     "wordle alternative",
     "casual game",
+    "find the cow game",
+    "daily brain teaser",
+    "quick puzzle game",
+    "word find game",
+    "hidden word puzzle",
+    "mobile puzzle game",
+    "viral puzzle game",
   ],
   authors: [{ name: "Find the COW" }],
   creator: "Find the COW",
   publisher: "Find the COW",
+  applicationName: "Find the COW",
+  appleWebApp: {
+    capable: true,
+    title: "Find the COW",
+    statusBarStyle: "default",
+  },
+  formatDetection: {
+    telephone: false,
+  },
   metadataBase: new URL("https://cow.kevinpek.com"),
   alternates: {
     canonical: "https://cow.kevinpek.com",
@@ -92,24 +108,35 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{
             __html: JSON.stringify({
               "@context": "https://schema.org",
-              "@type": "WebApplication",
+              "@type": ["WebApplication", "Game"],
               name: "Find the COW",
               description:
-                "A daily word search puzzle where you find the one hidden COW in a grid of C, O, and W letters.",
+                "A daily word search puzzle where you find the one hidden COW in a grid of C, O, and W letters. New puzzle every day!",
               url: "https://cow.kevinpek.com",
-              applicationCategory: "Game",
-              genre: "Puzzle",
+              applicationCategory: "GameApplication",
+              genre: ["Puzzle", "Word Game", "Casual"],
+              gamePlatform: ["Web Browser", "iOS Safari", "Android Chrome"],
               operatingSystem: "Any",
+              inLanguage: "en",
+              isAccessibleForFree: true,
+              playMode: "SinglePlayer",
+              numberOfPlayers: {
+                "@type": "QuantitativeValue",
+                minValue: 1,
+                maxValue: 1,
+              },
               offers: {
                 "@type": "Offer",
                 price: "0",
                 priceCurrency: "USD",
+                availability: "https://schema.org/InStock",
               },
-              aggregateRating: {
-                "@type": "AggregateRating",
-                ratingValue: "4.8",
-                ratingCount: "150",
+              publisher: {
+                "@type": "Organization",
+                name: "Find the COW",
+                url: "https://cow.kevinpek.com",
               },
+              image: "https://cow.kevinpek.com/opengraph-image",
             }),
           }}
         />
