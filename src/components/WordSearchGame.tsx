@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import confetti from "canvas-confetti";
 import {
   Puzzle,
@@ -82,6 +83,13 @@ export default function WordSearchGame({ dateStr, slot }: WordSearchGameProps) {
   // paused duration back into startTime on resume. Persisted in the save so a
   // reload while paused stays consistent.
   const [pausedAt, setPausedAt] = useState<number | null>(null);
+  // Today's date (local timezone), re-checked while the tab is open so the
+  // puzzle set rolls over at midnight without requiring a manual reload.
+  const [today, setToday] = useState(getTodayDateStr);
+  // True once midnight passed while viewing today's set mid-game: offers a
+  // banner to today's puzzles instead of yanking the running game.
+  const [newDayAvailable, setNewDayAvailable] = useState(false);
+  const router = useRouter();
 
   const pauseGame = useCallback(() => {
     if (pausedAt == null) {
@@ -217,6 +225,32 @@ export default function WordSearchGame({ dateStr, slot }: WordSearchGameProps) {
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => document.removeEventListener("visibilitychange", onVisibilityChange);
   }, [gameState, pauseGame]);
+
+  // Midnight rollover: re-check the local date every 30s. State updates only
+  // when the date string actually changes.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const t = getTodayDateStr();
+      setToday((prev) => (prev === t ? prev : t));
+    }, 30000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // When the date rolls over while viewing today's set: if no game is running,
+  // move to the same slot on the new day; otherwise raise a banner and let the
+  // player finish first. Archive browsing (older dates) is never redirected.
+  const prevTodayRef = useRef(today);
+  useEffect(() => {
+    const prev = prevTodayRef.current;
+    if (today === prev) return;
+    prevTodayRef.current = today;
+    if (dateStr !== prev) return;
+    if (gameState === "playing" || gameState === "paused") {
+      setNewDayAvailable(true);
+    } else {
+      router.push(`/?d=${today}&c=${safeSlot}`);
+    }
+  }, [today, dateStr, safeSlot, gameState, router]);
 
   useEffect(() => {
     if (puzzle && gameState !== "idle") {
@@ -445,7 +479,6 @@ export default function WordSearchGame({ dateStr, slot }: WordSearchGameProps) {
 
   const isDisabled = gameState === "idle";
   const isPaused = gameState === "paused";
-  const today = getTodayDateStr();
   const next = nextDateSlot(dateStr, safeSlot);
   const hasNext = next.dateStr <= today;
   const isLastToday = dateStr === today && safeSlot === 5;
@@ -500,6 +533,16 @@ export default function WordSearchGame({ dateStr, slot }: WordSearchGameProps) {
           </div>
         </div>
 
+        {/* New-day banner after a midnight rollover mid-game */}
+        {newDayAvailable && (
+          <Link
+            href={`/?d=${today}&c=1`}
+            className="block w-full py-3 px-6 mb-4 bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-200 font-semibold rounded-lg transition-colors text-center"
+          >
+            🎉 New puzzles are out — play today&apos;s set →
+          </Link>
+        )}
+
         {/* Timer - shown during play and after winning */}
         {gameState !== "idle" && (
           <div className="text-center mb-4">
@@ -508,70 +551,15 @@ export default function WordSearchGame({ dateStr, slot }: WordSearchGameProps) {
             </div>          </div>
         )}
 
-        {/* Instructions - hidden after winning to keep the win screen tight */}
-        {gameState !== "won" && (
+        {/* Playing hint - instructions live in the grid overlay before start,
+            and nothing shows after winning to keep the screen tight */}
+        {(gameState === "playing" || gameState === "paused") && (
         <div className="text-center mb-4 text-sm text-gray-600 dark:text-gray-400">
-          {gameState === "idle" ? (
-            <div className="space-y-3 text-left bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
-              <p className="font-semibold text-center text-base">How to Play</p>
-              <ul className="space-y-2">
-                <li className="flex items-start gap-2">
-                  <span>1.</span>
-                  <span>Find the word <strong>COW</strong> hidden in the grid</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span>2.</span>
-                  <span>Click and drag across 3 letters to select</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span>3.</span>
-                  <span>COW can be horizontal, vertical, or diagonal</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span>4.</span>
-                  <span>Complete it as fast as you can!</span>
-                </li>
-              </ul>
-
-              {/* Valid directions diagram */}
-              <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700">
-                <p className="text-xs text-center text-gray-500 dark:text-gray-400 mb-2">Valid drag directions (straight lines only)</p>
-                <div className="flex justify-center">
-                  <svg width="120" height="120" viewBox="0 0 120 120" className="text-amber-500">
-                    {/* Center dot */}
-                    <circle cx="60" cy="60" r="8" fill="currentColor" />
-
-                    {/* Horizontal arrows */}
-                    <line x1="20" y1="60" x2="40" y2="60" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                    <polygon points="15,60 25,55 25,65" fill="currentColor" />
-                    <line x1="80" y1="60" x2="100" y2="60" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                    <polygon points="105,60 95,55 95,65" fill="currentColor" />
-
-                    {/* Vertical arrows */}
-                    <line x1="60" y1="20" x2="60" y2="40" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                    <polygon points="60,15 55,25 65,25" fill="currentColor" />
-                    <line x1="60" y1="80" x2="60" y2="100" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                    <polygon points="60,105 55,95 65,95" fill="currentColor" />
-
-                    {/* Diagonal arrows */}
-                    <line x1="25" y1="25" x2="40" y2="40" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                    <polygon points="18,18 28,20 20,28" fill="currentColor" />
-                    <line x1="80" y1="80" x2="95" y2="95" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                    <polygon points="102,102 92,100 100,92" fill="currentColor" />
-
-                    <line x1="95" y1="25" x2="80" y2="40" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                    <polygon points="102,18 100,28 92,20" fill="currentColor" />
-                    <line x1="25" y1="95" x2="40" y2="80" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                    <polygon points="18,102 20,92 28,100" fill="currentColor" />
-                  </svg>
-                </div>
-              </div>
-            </div>
-          ) : gameState === "playing" ? (
+          {gameState === "playing" ? (
             <p>Drag to find the one hidden COW in the grid</p>
-          ) : gameState === "paused" ? (
+          ) : (
             <p className="invisible">Paused</p>
-          ) : null}
+          )}
         </div>
         )}
 
@@ -627,6 +615,63 @@ export default function WordSearchGame({ dateStr, slot }: WordSearchGameProps) {
             })
           )}
           </div>
+
+          {/* How-to overlay on the idle grid - instructions float over the
+              tiles so the page height matches the playing state */}
+          {gameState === "idle" && (
+            <div className="absolute inset-0 z-30 overflow-y-auto rounded-lg bg-white/95 dark:bg-gray-900/95 p-3 touch-pan-y">
+              <div className="space-y-3 text-left bg-gray-50 dark:bg-gray-800 p-4 rounded-lg text-sm text-gray-600 dark:text-gray-400">
+                <p className="font-semibold text-center text-base text-gray-900 dark:text-white">How to Play</p>
+                <ul className="space-y-2">
+                  <li className="flex items-start gap-2">
+                    <span>1.</span>
+                    <span>Find the word <strong>COW</strong> hidden in the grid</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span>2.</span>
+                    <span>Click and drag across 3 letters to select</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span>3.</span>
+                    <span>COW can be horizontal, vertical, or diagonal</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span>4.</span>
+                    <span>Complete it as fast as you can!</span>
+                  </li>
+                </ul>
+
+                <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700">
+                  <p className="text-xs text-center text-gray-500 dark:text-gray-400 mb-2">Valid drag directions (straight lines only)</p>
+                  <div className="flex justify-center">
+                    <svg width="120" height="120" viewBox="0 0 120 120" className="text-amber-500">
+                      <circle cx="60" cy="60" r="8" fill="currentColor" />
+
+                      <line x1="20" y1="60" x2="40" y2="60" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                      <polygon points="15,60 25,55 25,65" fill="currentColor" />
+                      <line x1="80" y1="60" x2="100" y2="60" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                      <polygon points="105,60 95,55 95,65" fill="currentColor" />
+
+                      <line x1="60" y1="20" x2="60" y2="40" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                      <polygon points="60,15 55,25 65,25" fill="currentColor" />
+                      <line x1="60" y1="80" x2="60" y2="100" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                      <polygon points="60,105 55,95 65,95" fill="currentColor" />
+
+                      <line x1="25" y1="25" x2="40" y2="40" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                      <polygon points="18,18 28,20 20,28" fill="currentColor" />
+                      <line x1="80" y1="80" x2="95" y2="95" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                      <polygon points="102,102 92,100 100,92" fill="currentColor" />
+
+                      <line x1="95" y1="25" x2="80" y2="40" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                      <polygon points="102,18 100,28 92,20" fill="currentColor" />
+                      <line x1="25" y1="95" x2="40" y2="80" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                      <polygon points="18,102 20,92 28,100" fill="currentColor" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Selection line overlay */}
           {isSelecting && selectedCells.length > 0 && dragEndCell && gridRef.current &&
@@ -694,9 +739,12 @@ export default function WordSearchGame({ dateStr, slot }: WordSearchGameProps) {
         {gameState === "paused" && (
           <button
             onClick={handleResume}
-            className="w-full py-4 px-6 bg-amber-500 hover:bg-amber-600 text-white text-xl font-bold rounded-lg transition-colors mb-6"
+            className="w-full py-4 px-6 bg-amber-500 hover:bg-amber-600 text-white text-xl font-bold rounded-lg transition-colors mb-6 flex items-center justify-center gap-2"
           >
-            ▶ Resume
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path d="M6 4.5v11l9-5.5-9-5.5z" />
+            </svg>
+            Resume
           </button>
         )}
 
