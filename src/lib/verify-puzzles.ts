@@ -1,26 +1,30 @@
 import {
-  generatePuzzle,
+  generatePuzzleForSlot,
   verifyPuzzle,
-  getGridHash,
   verifyUniqueness,
+  SLOTS,
+  type Slot,
 } from "./puzzle";
 
-// Verify puzzles for 2025
+// Verify puzzles for 2025 (5 shared slots per day)
 const startDate = "2025-01-01";
 const numDays = 365;
+const slots = SLOTS.map((s) => s.slot);
 
-console.log(`Verifying ${numDays} puzzles starting from ${startDate}...`);
+console.log(
+  `Verifying ${numDays * slots.length} puzzles (${numDays} days x ${slots.length} slots) starting from ${startDate}...`
+);
 console.log("");
 
-// Check uniqueness
-const { unique, duplicates } = verifyUniqueness(startDate, numDays);
+// Check uniqueness (size-scoped so different grid sizes never false-collide)
+const { unique, duplicates } = verifyUniqueness(startDate, numDays, slots);
 
 if (unique) {
-  console.log(`All ${numDays} puzzles are unique!`);
+  console.log(`All ${numDays * slots.length} puzzles are unique!`);
 } else {
   console.log(`Found ${duplicates.length} duplicate puzzles:`);
-  for (const [date1, date2] of duplicates) {
-    console.log(`  ${date1} and ${date2} have the same grid`);
+  for (const [key1, key2] of duplicates.slice(0, 20)) {
+    console.log(`  ${key1} and ${key2} have the same grid`);
   }
 }
 
@@ -38,10 +42,14 @@ const sampleDates = [
 
 let allValid = true;
 for (const date of sampleDates) {
-  const puzzle = generatePuzzle(date);
-  const isValid = verifyPuzzle(puzzle);
-  console.log(`  ${date}: ${isValid ? "Valid (1 COW)" : "INVALID!"}`);
-  if (!isValid) allValid = false;
+  for (const slot of slots as Slot[]) {
+    const puzzle = generatePuzzleForSlot(date, slot);
+    const isValid = verifyPuzzle(puzzle);
+    console.log(
+      `  ${date} slot ${slot} (${puzzle.size}x${puzzle.size}): ${isValid ? "Valid (1 COW)" : "INVALID!"}`
+    );
+    if (!isValid) allValid = false;
+  }
 }
 
 console.log("");
@@ -53,9 +61,9 @@ if (allValid) {
 
 // Show today's puzzle
 console.log("");
-console.log("Today's puzzle preview:");
+console.log("Today's puzzle preview (slot 1):");
 const today = new Date().toISOString().split("T")[0];
-const todayPuzzle = generatePuzzle(today);
+const todayPuzzle = generatePuzzleForSlot(today, 1);
 console.log(`Date: ${todayPuzzle.date}`);
 console.log(`Puzzle #${todayPuzzle.puzzleNumber}`);
 console.log("");

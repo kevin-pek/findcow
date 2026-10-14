@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Find the COW - Daily Word Search Puzzle Game",
   description:
-    "Can you find the hidden COW? Play the viral daily word search puzzle challenging thousands. One hidden COW, one grid, new puzzle every midnight. Free to play - share your score!",
+    "Can you find the hidden COW? Play the viral daily word search puzzle challenging thousands. Five hidden COWs, five grids, new puzzles every midnight. Free to play - share your score!",
   keywords: [
     "word search",
     "puzzle game",

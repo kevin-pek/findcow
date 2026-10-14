@@ -1,11 +1,20 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
+import Link from "next/link";
+import confetti from "canvas-confetti";
 import {
   Puzzle,
-  generatePuzzle,
+  Slot,
+  SLOTS,
+  generatePuzzleForSlot,
   getTodayDateStr,
-  validatePuzzleForDate,
+  nextDateSlot,
+  normalizeSlot,
+  progressKey,
+  puzzleLabel,
+  saveKey,
+  validatePuzzleForSlot,
 } from "@/lib/puzzle";
 import AdUnit from "./AdUnit";
 
@@ -14,9 +23,52 @@ type CellPosition = {
   col: number;
 };
 
-type GameState = "idle" | "playing" | "won";
+type GameState = "idle" | "playing" | "paused" | "won";
 
-export default function WordSearchGame() {
+type WordSearchGameProps = {
+  dateStr: string;
+  slot: Slot;
+};
+
+function markProgress(dateStr: string, slot: Slot, elapsedSec: number) {
+  try {
+    const raw = localStorage.getItem(progressKey(dateStr));
+    const progress = raw ? (JSON.parse(raw) as Record<string, number>) : {};
+    const prev = progress[String(slot)];
+    if (prev == null || elapsedSec < prev) {
+      progress[String(slot)] = elapsedSec;
+      localStorage.setItem(progressKey(dateStr), JSON.stringify(progress));
+    }
+  } catch {
+    // localStorage unavailable — progress is best-effort
+  }
+}
+
+// Short confetti celebration on a fresh win. Skipped for users who prefer
+// reduced motion. Fired from the win handler only — never on reloads.
+function celebrate() {
+  try {
+    if (
+      typeof window === "undefined" ||
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+    ) {
+      return;
+    }
+    const base = { zIndex: 9999, disableForReducedMotion: true };
+    confetti({ ...base, particleCount: 90, spread: 75, origin: { y: 0.65 } });
+    window.setTimeout(() => {
+      confetti({ ...base, particleCount: 45, angle: 60, spread: 60, origin: { x: 0, y: 0.7 } });
+    }, 150);
+    window.setTimeout(() => {
+      confetti({ ...base, particleCount: 45, angle: 120, spread: 60, origin: { x: 1, y: 0.7 } });
+    }, 300);
+  } catch {
+    // confetti is decorative — never break the win path
+  }
+}
+
+export default function WordSearchGame({ dateStr, slot }: WordSearchGameProps) {
+  const safeSlot = normalizeSlot(slot);
   const [puzzle, setPuzzle] = useState<Puzzle | null>(null);
   const [selectedCells, setSelectedCells] = useState<CellPosition[]>([]);
   const [isSelecting, setIsSelecting] = useState(false);
@@ -27,37 +79,117 @@ export default function WordSearchGame() {
   const [startTime, setStartTime] = useState<number | null>(null);
   const [endTime, setEndTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
+  // Suspended-at timestamp: set when the game is paused, used to credit the
+  // paused duration back into startTime on resume. Persisted in the save so a
+  // reload while paused stays consistent.
+  const [pausedAt, setPausedAt] = useState<number | null>(null);
+
+  const pauseGame = useCallback(() => {
+    if (pausedAt == null) {
+      setPausedAt(Date.now());
+      setGameState("paused");
+    }
+  }, [pausedAt]);
+
+  const handleResume = useCallback(() => {
+    if (pausedAt != null) {
+      const now = Date.now();
+      setStartTime((t) => (t == null ? t : t + (now - pausedAt)));
+    }
+    setPausedAt(null);
+    // Clear any half-finished drag from before the pause
+    setSelectedCells([]);
+    setIsSelecting(false);
+    setDragEndCell(null);
+    setGameState("playing");
+  }, [pausedAt]);
 
   useEffect(() => {
-    const dateStr = getTodayDateStr();
-    const savedState = localStorage.getItem(`findcow-${dateStr}`);
+    const key = saveKey(dateStr, safeSlot);
+    const savedState = localStorage.getItem(key);
 
-    if (savedState) {
-      const state = JSON.parse(savedState);
+    const freshPuzzle = () => {
+      const newPuzzle = generatePuzzleForSlot(dateStr, safeSlot);
+      setPausedAt(null);
+      setPuzzle(newPuzzle);
+      setGameState("idle");
+      setFoundCow([]);
+      setStartTime(null);
+      setEndTime(null);
+      setElapsedTime(0);
+      setSelectedCells([]);
+    };
 
-      // Validate that saved puzzle matches expected puzzle for this date
-      // This prevents tampering and ensures consistency across devices
-      if (state.puzzle && validatePuzzleForDate(state.puzzle)) {
-        setPuzzle(state.puzzle);
-        setGameState(state.gameState);
-        setFoundCow(state.foundCow);
-        setStartTime(state.startTime);
-        setEndTime(state.endTime);
-        if (state.startTime && state.endTime) {
-          setElapsedTime(Math.floor((state.endTime - state.startTime) / 1000));
+    // One-time migration: legacy `findcow-${date}` (slot-1 era) -> new slot-1 key
+    if (safeSlot === 1) {
+      const legacy = localStorage.getItem(`findcow-${dateStr}`);
+      if (legacy && !savedState) {
+        try {
+          const state = JSON.parse(legacy);
+          if (state.puzzle && validatePuzzleForSlot({ ...state.puzzle, slot: 1 })) {
+            localStorage.setItem(key, legacy);
+          }
+        } catch {
+          // fall through to fresh puzzle
         }
-      } else {
-        // Invalid saved state - regenerate fresh puzzle
-        console.warn("Saved puzzle validation failed, regenerating...");
         localStorage.removeItem(`findcow-${dateStr}`);
-        const newPuzzle = generatePuzzle(dateStr);
-        setPuzzle(newPuzzle);
+      }
+    }
+
+    const current = localStorage.getItem(key);
+    if (current || savedState) {
+      try {
+        const state = JSON.parse((current ?? savedState) as string);
+
+        // Validate that saved puzzle matches expected puzzle for this date+slot
+        // This prevents tampering and ensures consistency across devices
+        if (
+          state.puzzle &&
+          state.puzzle.date === dateStr &&
+          validatePuzzleForSlot(state.puzzle)
+        ) {
+          setPuzzle(state.puzzle);
+          setFoundCow(state.foundCow ?? []);
+          setStartTime(state.startTime);
+          setEndTime(state.endTime);
+          if (state.startTime && state.endTime) {
+            const secs = Math.floor((state.endTime - state.startTime) / 1000);
+            setElapsedTime(secs);
+            setGameState(state.gameState);
+            // Backfill progress index for wins recorded before it existed
+            // (e.g. migrated legacy saves), so the archive shows them done.
+            if (state.gameState === "won") {
+              markProgress(dateStr, safeSlot, secs);
+            }
+          } else if (
+            state.startTime &&
+            (state.gameState === "playing" || state.gameState === "paused")
+          ) {
+            // Never auto-run a restored game: come back paused and require an
+            // explicit press of play to resume the timer.
+            const pausedAt =
+              typeof state.pausedAt === "number" ? state.pausedAt : Date.now();
+            setPausedAt(pausedAt);
+            setGameState("paused");
+            setElapsedTime(Math.max(0, Math.floor((pausedAt - state.startTime) / 1000)));
+          } else {
+            setGameState(state.gameState);
+            setElapsedTime(0);
+          }
+        } else {
+          // Invalid saved state - regenerate fresh puzzle
+          console.warn("Saved puzzle validation failed, regenerating...");
+          localStorage.removeItem(key);
+          freshPuzzle();
+        }
+      } catch {
+        localStorage.removeItem(key);
+        freshPuzzle();
       }
     } else {
-      const newPuzzle = generatePuzzle(dateStr);
-      setPuzzle(newPuzzle);
+      freshPuzzle();
     }
-  }, []);
+  }, [dateStr, safeSlot]);
 
   // Live timer during gameplay
   useEffect(() => {
@@ -74,23 +206,37 @@ export default function WordSearchGame() {
     };
   }, [gameState, startTime]);
 
+  // Pause the game when the tab is hidden. The timer stays frozen until the
+  // user explicitly presses play again — background time never counts and
+  // there is no auto-resume.
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.hidden && gameState === "playing") {
+        pauseGame();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [gameState, pauseGame]);
+
   useEffect(() => {
     if (puzzle && gameState !== "idle") {
-      const dateStr = getTodayDateStr();
       localStorage.setItem(
-        `findcow-${dateStr}`,
+        saveKey(dateStr, safeSlot),
         JSON.stringify({
           puzzle,
           gameState,
           foundCow,
           startTime,
           endTime,
+          pausedAt,
         })
       );
     }
-  }, [puzzle, gameState, foundCow, startTime, endTime]);
+  }, [puzzle, gameState, foundCow, startTime, endTime, pausedAt, dateStr, safeSlot]);
 
   const handleStartGame = useCallback(() => {
+    setPausedAt(null);
     setGameState("playing");
     setStartTime(Date.now());
     setFoundCow([]);
@@ -122,37 +268,6 @@ export default function WordSearchGame() {
 
       const cells: CellPosition[] = [];
       for (let i = 0; i <= maxDistance; i++) {
-        cells.push({
-          row: start.row + stepY * i,
-          col: start.col + stepX * i,
-        });
-      }
-
-      return cells;
-    },
-    []
-  );
-
-  // Get cells in a line only if exactly 3 cells (for COW validation)
-  const getCellsInLine = useCallback(
-    (start: CellPosition, end: CellPosition): CellPosition[] | null => {
-      const dx = end.col - start.col;
-      const dy = end.row - start.row;
-
-      // Must be exactly 3 cells for COW
-      const distance = Math.max(Math.abs(dx), Math.abs(dy));
-      if (distance !== 2) return null;
-
-      // Must be horizontal, vertical, or diagonal
-      if (Math.abs(dx) !== 0 && Math.abs(dy) !== 0 && Math.abs(dx) !== Math.abs(dy)) {
-        return null;
-      }
-
-      const stepX = dx === 0 ? 0 : dx / Math.abs(dx);
-      const stepY = dy === 0 ? 0 : dy / Math.abs(dy);
-
-      const cells: CellPosition[] = [];
-      for (let i = 0; i <= distance; i++) {
         cells.push({
           row: start.row + stepY * i,
           col: start.col + stepX * i,
@@ -222,13 +337,16 @@ export default function WordSearchGame() {
       setGameState("won");
       setFoundCow(selectedCells);
       setEndTime(now);
+      celebrate();
       if (startTime) {
-        setElapsedTime(Math.floor((now - startTime) / 1000));
+        const secs = Math.floor((now - startTime) / 1000);
+        setElapsedTime(secs);
+        markProgress(dateStr, safeSlot, secs);
       }
     } else {
       setSelectedCells([]);
     }
-  }, [isSelecting, gameState, selectedCells, checkSelection, startTime]);
+  }, [isSelecting, gameState, selectedCells, checkSelection, startTime, dateStr, safeSlot]);
 
   // Touch handlers for mobile
   const handleTouchStart = useCallback(
@@ -304,7 +422,7 @@ export default function WordSearchGame() {
   const shareResult = async () => {
     if (!puzzle) return;
 
-    const text = `Find the COW #${puzzle.puzzleNumber}\n🐮 Found in ${formatTime(elapsedTime)}\n\nPlay at: cow.kevinpek.com`;
+    const text = `Find the COW ${puzzleLabel(puzzle)}\n🐮 Found in ${formatTime(elapsedTime)}\n\nPlay at: cow.kevinpek.com`;
 
     if (navigator.share) {
       try {
@@ -327,6 +445,11 @@ export default function WordSearchGame() {
   }
 
   const isDisabled = gameState === "idle";
+  const isPaused = gameState === "paused";
+  const today = getTodayDateStr();
+  const next = nextDateSlot(dateStr, safeSlot);
+  const hasNext = next.dateStr <= today;
+  const isLastToday = dateStr === today && safeSlot === 5;
 
   return (
     <div className="flex flex-col items-center justify-center h-auto p-4 select-none">
@@ -344,8 +467,45 @@ export default function WordSearchGame() {
             Find the COW
           </h1>
           <p className="text-gray-600 dark:text-gray-400">
-            Puzzle #{puzzle.puzzleNumber} • {puzzle.date}
+            Puzzle {puzzleLabel(puzzle)} • {puzzle.date} • {puzzle.size}×{puzzle.size}
           </p>
+          <div className="flex justify-center gap-2 mt-3" role="tablist" aria-label="Daily challenges">
+            {SLOTS.map((s) => {
+              const isCurrent = s.slot === safeSlot;
+              // Lock tab switching mid-game: navigating away would abandon the
+              // running timer, so tabs are inert until the game is won (or
+              // before it starts).
+              if (gameState === "playing" && !isCurrent) {
+                return (
+                  <span
+                    key={s.slot}
+                    role="tab"
+                    aria-selected={false}
+                    aria-disabled={true}
+                    title="Finish the current game first"
+                    className="w-9 h-9 flex items-center justify-center rounded-lg font-bold text-sm bg-gray-100 dark:bg-gray-800 opacity-40 cursor-not-allowed"
+                  >
+                    {s.slot}
+                  </span>
+                );
+              }
+              return (
+                <Link
+                  key={s.slot}
+                  role="tab"
+                  aria-selected={isCurrent}
+                  href={`/?d=${dateStr}&c=${s.slot}`}
+                  className={`w-9 h-9 flex items-center justify-center rounded-lg font-bold text-sm transition-colors ${
+                    isCurrent
+                      ? "bg-amber-500 text-white"
+                      : "bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700"
+                  }`}
+                >
+                  {s.slot}
+                </Link>
+              );
+            })}
+          </div>
         </div>
 
         {/* Timer - shown during play and after winning */}
@@ -353,11 +513,11 @@ export default function WordSearchGame() {
           <div className="text-center mb-4">
             <div className={`text-4xl font-mono font-bold ${gameState === "won" ? "text-green-600 dark:text-green-400" : ""}`}>
               {formatTime(elapsedTime)}
-            </div>
-          </div>
+            </div>          </div>
         )}
 
-        {/* Instructions */}
+        {/* Instructions - hidden after winning to keep the win screen tight */}
+        {gameState !== "won" && (
         <div className="text-center mb-4 text-sm text-gray-600 dark:text-gray-400">
           {gameState === "idle" ? (
             <div className="space-y-3 text-left bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
@@ -417,18 +577,17 @@ export default function WordSearchGame() {
             </div>
           ) : gameState === "playing" ? (
             <p>Drag to find the one hidden COW in the grid</p>
-          ) : (
-            <p className="text-green-600 dark:text-green-400 font-semibold">
-              🎉 You found the COW!
-            </p>
-          )}
+          ) : gameState === "paused" ? (
+            <p className="invisible">Paused</p>
+          ) : null}
         </div>
+        )}
 
         {/* Grid */}
         <div className="relative mx-auto mb-6" style={{ maxWidth: "min(100%, 400px)" }}>
           <div
             ref={gridRef}
-            className={`grid gap-1 md:gap-2 touch-none ${isDisabled ? "opacity-50" : ""}`}
+            className={`grid gap-1 md:gap-2 touch-none ${isDisabled || isPaused ? "opacity-50" : ""}`}
             style={{
               gridTemplateColumns: `repeat(${puzzle.size}, minmax(0, 1fr))`,
             }}
@@ -452,7 +611,7 @@ export default function WordSearchGame() {
                     aspect-square flex items-center justify-center
                     text-xl md:text-3xl font-bold rounded-lg
                     transition-all duration-150
-                    ${isDisabled ? "cursor-not-allowed" : "cursor-pointer"}
+                    ${isDisabled || isPaused ? "cursor-not-allowed" : "cursor-pointer"}
                     ${
                       isFound
                         ? "bg-green-500 text-white scale-105"
@@ -468,7 +627,7 @@ export default function WordSearchGame() {
                   onMouseEnter={() => handleCellMouseEnter(rowIndex, colIndex)}
                   onTouchStart={() => handleTouchStart(rowIndex, colIndex)}
                 >
-                  {isDisabled ? "" : letter}
+                  {isDisabled || isPaused ? "" : letter}
                 </div>
               );
             })
@@ -537,19 +696,60 @@ export default function WordSearchGame() {
           </button>
         )}
 
-        {/* Share button */}
-        {gameState === "won" && (
+        {/* Resume Button */}
+        {gameState === "paused" && (
           <button
-            onClick={shareResult}
-            className="w-full py-3 px-6 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors"
+            onClick={handleResume}
+            className="w-full py-4 px-6 bg-amber-500 hover:bg-amber-600 text-white text-xl font-bold rounded-lg transition-colors mb-6"
           >
-            Share Result 🐮
+            ▶ Resume
           </button>
         )}
 
+        {/* Share + Next buttons */}
+        {gameState === "won" && (
+          <div className="space-y-3">
+            <button
+              onClick={shareResult}
+              className="w-full py-3 px-6 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors"
+            >
+              Share Result 🐮
+            </button>
+            {hasNext ? (
+              <Link
+                href={`/?d=${next.dateStr}&c=${next.slot}`}
+                className="block w-full py-3 px-6 bg-gray-800 hover:bg-gray-900 text-white font-semibold rounded-lg transition-colors text-center"
+              >
+                Next Cow →
+              </Link>
+            ) : isLastToday ? (
+              <Link
+                href="/archive"
+                className="block w-full py-3 px-6 bg-gray-800 hover:bg-gray-900 text-white font-semibold rounded-lg transition-colors text-center"
+              >
+                You cleared today 5/5 — play previous puzzles →
+              </Link>
+            ) : null}
+          </div>
+        )}
+
         {/* Footer */}
-        <div className="text-center mt-4 text-xs text-gray-500 dark:text-gray-500">
-          <p>New puzzle every day at midnight</p>
+        <div className="text-center mt-4 text-xs text-gray-500 dark:text-gray-500 space-y-1">
+          <p>5 fresh puzzles every day at midnight</p>
+          <p>
+            {gameState === "playing" ? (
+              <span
+                title="Finish the current game first"
+                className="underline opacity-40 cursor-not-allowed"
+              >
+                Play previous puzzles
+              </span>
+            ) : (
+              <Link href="/archive" className="underline hover:text-gray-700 dark:hover:text-gray-300">
+                Play previous puzzles
+              </Link>
+            )}
+          </p>
         </div>
       </div>
     </div>

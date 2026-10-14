@@ -9,5 +9,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 1,
       images: ["https://cow.kevinpek.com/opengraph-image"],
     },
+    {
+      url: "https://cow.kevinpek.com/archive",
+      lastModified: new Date(),
+      changeFrequency: "daily",
+      priority: 0.8,
+    },
   ];
 }

@@ -45,6 +45,7 @@ export type Puzzle = {
   size: number;
   cowPosition: CowPosition;
   date: string;
+  slot: Slot;
   puzzleNumber: number;
   hash: string; // Grid hash for verification
 };
@@ -274,7 +275,74 @@ function generateGrid(
 
 // Get the epoch date for puzzle numbering (when the game "launched")
 // Use UTC to ensure consistency across all timezones
-const EPOCH_DATE = Date.UTC(2025, 0, 1); // Jan 1, 2025 UTC
+export const EPOCH_DATE = Date.UTC(2025, 0, 1); // Jan 1, 2025 UTC
+export const EPOCH_DATE_STR = "2025-01-01";
+
+// Daily challenge slots: 5 shared puzzles per day, same grid for everyone.
+// Slot 1 preserves the legacy seed (dateStr alone) for backward compatibility.
+export type Slot = 1 | 2 | 3 | 4 | 5;
+
+export type SlotDef = {
+  slot: Slot;
+  label: string;
+  size: number;
+};
+
+export const SLOTS: SlotDef[] = [
+  { slot: 1, label: "Classic", size: 6 },
+  { slot: 2, label: "Classic+", size: 6 },
+  { slot: 3, label: "Tricky", size: 7 },
+  { slot: 4, label: "Tricky+", size: 7 },
+  { slot: 5, label: "Beast", size: 8 },
+];
+
+export function normalizeSlot(slot: number): Slot {
+  if (slot >= 1 && slot <= 5) return slot as Slot;
+  return 1;
+}
+
+export function getSlotDef(slot: Slot): SlotDef {
+  return SLOTS[slot - 1];
+}
+
+// Seed key for a date+slot. Slot 1 uses the bare date for back-compat.
+export function slotSeedKey(dateStr: string, slot: Slot): string {
+  return slot === 1 ? dateStr : `${dateStr}#${slot}`;
+}
+
+// Clamp any string to a playable date in [EPOCH, today]. Future dates are
+// clamped to today so tomorrow's puzzles can't be leaked via URL.
+export function clampDateStr(input: string | null | undefined): string {
+  const today = getTodayDateStr();
+  if (!input || !/^\d{4}-\d{2}-\d{2}$/.test(input)) return today;
+  if (input < EPOCH_DATE_STR) return EPOCH_DATE_STR;
+  if (input > today) return today;
+  const [y, m, d] = input.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (
+    dt.getUTCFullYear() !== y ||
+    dt.getUTCMonth() !== m - 1 ||
+    dt.getUTCDate() !== d
+  ) {
+    return today;
+  }
+  return input;
+}
+
+export function dateFromPuzzleNumber(n: number): string {
+  const safe = Math.max(1, Math.floor(n));
+  const ms = EPOCH_DATE + (safe - 1) * 24 * 60 * 60 * 1000;
+  return new Date(ms).toISOString().split("T")[0];
+}
+
+// Local-storage keys: per-puzzle save + per-day 5-slot progress index.
+export function saveKey(dateStr: string, slot: Slot): string {
+  return `findcow-${dateStr}-s${slot}`;
+}
+
+export function progressKey(dateStr: string): string {
+  return `findcow-progress:${dateStr}`;
+}
 
 export function getPuzzleNumber(dateStr: string): number {
   // Parse date string as UTC
@@ -285,22 +353,34 @@ export function getPuzzleNumber(dateStr: string): number {
   return diffDays + 1;
 }
 
-// Generate puzzle for a specific date
+// Generate puzzle for a specific date (legacy: slot 1, 6x6)
 export function generatePuzzle(dateStr: string, size: number = 6): Puzzle {
-  const seed = dateToSeed(dateStr);
+  return generatePuzzleForSlot(dateStr, 1, size);
+}
+
+// Generate the shared deterministic puzzle for a date+slot.
+// Slot 1 with default size reproduces the legacy puzzle exactly.
+export function generatePuzzleForSlot(
+  dateStr: string,
+  slot: Slot,
+  size?: number
+): Puzzle {
+  const resolvedSize = size ?? getSlotDef(slot).size;
+  const seed = dateToSeed(slotSeedKey(dateStr, slot));
 
   // Try multiple times with different sub-seeds if needed
   for (let subSeed = 0; subSeed < 1000; subSeed++) {
     const subRandom = seededRandom(seed + subSeed);
-    const result = generateGrid(subRandom, size);
+    const result = generateGrid(subRandom, resolvedSize);
     if (result) {
       const hash = getGridHash(result.grid);
 
       const puzzle: Puzzle = {
         grid: result.grid,
-        size,
+        size: resolvedSize,
         cowPosition: result.cowPosition,
         date: dateStr,
+        slot,
         puzzleNumber: getPuzzleNumber(dateStr),
         hash,
       };
@@ -308,7 +388,9 @@ export function generatePuzzle(dateStr: string, size: number = 6): Puzzle {
       // Runtime validation - ensure exactly one COW exists
       const cowCount = countCows(result.grid);
       if (cowCount !== 1) {
-        console.error(`Invalid puzzle generated for ${dateStr}: found ${cowCount} COWs`);
+        console.error(
+          `Invalid puzzle generated for ${dateStr} slot ${slot}: found ${cowCount} COWs`
+        );
         continue; // Try next sub-seed
       }
 
@@ -316,7 +398,7 @@ export function generatePuzzle(dateStr: string, size: number = 6): Puzzle {
     }
   }
 
-  throw new Error(`Could not generate valid puzzle for date: ${dateStr}`);
+  throw new Error(`Could not generate valid puzzle for date: ${dateStr} slot: ${slot}`);
 }
 
 // Get today's date string in YYYY-MM-DD format (local timezone)
@@ -335,11 +417,20 @@ export function verifyPuzzle(puzzle: Puzzle): boolean {
   return cowCount && hashMatches;
 }
 
-// Validate a puzzle matches expected generation for its date
-// This ensures a saved puzzle hasn't been tampered with
+// Validate a puzzle matches expected generation for its date+slot
+// This ensures a saved puzzle hasn't been tampered with.
+// Back-compat: saves without a slot field are treated as slot 1.
 export function validatePuzzleForDate(puzzle: Puzzle): boolean {
-  // Regenerate the puzzle for this date
-  const expectedPuzzle = generatePuzzle(puzzle.date, puzzle.size);
+  return validatePuzzleForSlot(puzzle);
+}
+
+export function validatePuzzleForSlot(puzzle: Puzzle): boolean {
+  const slot = normalizeSlot((puzzle as Partial<Puzzle>).slot ?? 1);
+  const expectedPuzzle = generatePuzzleForSlot(
+    puzzle.date,
+    slot,
+    puzzle.size
+  );
 
   // Check if the hash matches what we'd generate
   return puzzle.hash === expectedPuzzle.hash;
@@ -350,10 +441,32 @@ export function getGridHash(grid: string[][]): string {
   return grid.map((row) => row.join("")).join("");
 }
 
+// Display label: "#412" for slot 1 (legacy), "#412-3" otherwise.
+export function puzzleLabel(puzzle: Pick<Puzzle, "puzzleNumber" | "slot">): string {
+  const slot = normalizeSlot(puzzle.slot ?? 1);
+  return slot === 1 ? `#${puzzle.puzzleNumber}` : `#${puzzle.puzzleNumber}-${slot}`;
+}
+
+// Next puzzle in the catch-up chain: s1..s4 -> same date next slot,
+// s5 -> slot 1 of the next day (clamped to today by callers).
+export function nextDateSlot(
+  dateStr: string,
+  slot: Slot
+): { dateStr: string; slot: Slot } {
+  if (slot < 5) return { dateStr, slot: (slot + 1) as Slot };
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const next = new Date(Date.UTC(y, m - 1, d + 1));
+  return {
+    dateStr: next.toISOString().split("T")[0],
+    slot: 1,
+  };
+}
+
 // Generate multiple puzzles and verify uniqueness
 export function verifyUniqueness(
   startDate: string,
-  numDays: number
+  numDays: number,
+  slots: Slot[] = [1]
 ): { unique: boolean; duplicates: string[][] } {
   const hashes = new Map<string, string>();
   const duplicates: string[][] = [];
@@ -364,13 +477,16 @@ export function verifyUniqueness(
     date.setDate(date.getDate() + i);
     const dateStr = date.toISOString().split("T")[0];
 
-    const puzzle = generatePuzzle(dateStr);
-    const hash = getGridHash(puzzle.grid);
+    for (const slot of slots) {
+      const puzzle = generatePuzzleForSlot(dateStr, slot);
+      const hash = `${puzzle.size}:${getGridHash(puzzle.grid)}`;
+      const key = `${dateStr}-s${slot}`;
 
-    if (hashes.has(hash)) {
-      duplicates.push([hashes.get(hash)!, dateStr]);
-    } else {
-      hashes.set(hash, dateStr);
+      if (hashes.has(hash)) {
+        duplicates.push([hashes.get(hash)!, key]);
+      } else {
+        hashes.set(hash, key);
+      }
     }
   }
 
