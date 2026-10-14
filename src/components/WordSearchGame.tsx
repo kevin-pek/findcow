@@ -44,9 +44,18 @@ function markProgress(dateStr: string, slot: Slot, elapsedSec: number) {
   }
 }
 
-// All 5 slots cleared for a date. Read during render only on the win screen,
-// which always renders post-mount (gameState comes from effects), so there is
-// no SSR/hydration mismatch from touching localStorage here.
+// Best clear times per slot for a date (slot -> seconds). Empty when nothing
+// is cleared yet or storage is unavailable.
+function readProgress(dateStr: string): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(progressKey(dateStr));
+    return raw ? (JSON.parse(raw) as Record<string, number>) : {};
+  } catch {
+    return {};
+  }
+}
+
+// All 5 slots cleared for a date.
 function isDayComplete(dateStr: string): boolean {
   try {
     const raw = localStorage.getItem(progressKey(dateStr));
@@ -499,10 +508,48 @@ export default function WordSearchGame({ dateStr, slot }: WordSearchGameProps) {
   // Today's whole set cleared: no point offering Next into done puzzles.
   // (Archive dates keep chaining forward for the catch-up flow.)
   const clearedToday = dateStr === today && isDayComplete(dateStr);
+  // Per-slot clears for tab colors. Tabs render only after the puzzle loads
+  // post-mount (and re-render on every win via gameState), so reading
+  // localStorage here is hydration-safe and always fresh.
+  const dayProgress = readProgress(dateStr);
 
   return (
     <div className="flex flex-col items-center justify-center h-auto p-4 select-none">
       <div className="w-full max-w-md">
+        {/* Back-to-today banner on previous days. Locked mid-game like every
+            other exit. */}
+        {dateStr < today &&
+          (gameState === "playing" ? (
+            <div
+              title="Finish the current game first"
+              className="flex items-center gap-3 mb-4 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-4 py-3 opacity-50 cursor-not-allowed"
+            >
+              <span className="flex items-center justify-center w-8 h-8 rounded-full bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-900 shrink-0">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M10 3 5 8l5 5" />
+                </svg>
+              </span>
+              <span className="block font-bold text-gray-900 dark:text-white">
+                Back to today&apos;s puzzles
+              </span>
+            </div>
+          ) : (
+            <Link
+              href="/"
+              aria-label="Back to today's puzzles"
+              className="flex items-center gap-3 mb-4 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            >
+              <span className="flex items-center justify-center w-8 h-8 rounded-full bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-900 shrink-0">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M10 3 5 8l5 5" />
+                </svg>
+              </span>
+              <span className="block font-bold text-gray-900 dark:text-white">
+                Back to today&apos;s puzzles
+              </span>
+            </Link>
+          ))}
+
         {/* Header */}
         <div className="text-center mb-6">
           <h1 className="text-3xl md:text-4xl font-bold mb-2">
@@ -514,6 +561,16 @@ export default function WordSearchGame({ dateStr, slot }: WordSearchGameProps) {
           <div className="flex justify-center gap-2 mt-3" role="tablist" aria-label="Daily challenges">
             {SLOTS.map((s) => {
               const isCurrent = s.slot === safeSlot;
+              // Green = cleared (best time recorded in the progress index);
+              // amber = current and still unfinished. Tabs render only after
+              // the puzzle loads post-mount, so reading localStorage here is
+              // hydration-safe.
+              const isDone = dayProgress[String(s.slot)] != null;
+              const tone = isDone
+                ? "bg-green-500 text-white"
+                : isCurrent
+                  ? "bg-amber-500 text-white"
+                  : "bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700";
               // Lock tab switching mid-game: navigating away would abandon the
               // running timer, so tabs are inert until the game is won (or
               // before it starts).
@@ -525,7 +582,7 @@ export default function WordSearchGame({ dateStr, slot }: WordSearchGameProps) {
                     aria-selected={false}
                     aria-disabled={true}
                     title="Finish the current game first"
-                    className="w-9 h-9 flex items-center justify-center rounded-lg font-bold text-sm bg-gray-100 dark:bg-gray-800 opacity-40 cursor-not-allowed"
+                    className={`w-9 h-9 flex items-center justify-center rounded-lg font-bold text-sm opacity-40 cursor-not-allowed ${tone}`}
                   >
                     {s.slot}
                   </span>
@@ -537,11 +594,7 @@ export default function WordSearchGame({ dateStr, slot }: WordSearchGameProps) {
                   role="tab"
                   aria-selected={isCurrent}
                   href={`/?d=${dateStr}&c=${s.slot}`}
-                  className={`w-9 h-9 flex items-center justify-center rounded-lg font-bold text-sm transition-colors ${
-                    isCurrent
-                      ? "bg-amber-500 text-white"
-                      : "bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700"
-                  }`}
+                  className={`w-9 h-9 flex items-center justify-center rounded-lg font-bold text-sm transition-colors ${tone}`}
                 >
                   {s.slot}
                 </Link>
@@ -795,25 +848,6 @@ export default function WordSearchGame({ dateStr, slot }: WordSearchGameProps) {
         {/* Footer */}
         <div className="text-center mt-4 text-xs text-gray-500 dark:text-gray-500 space-y-1">
           <p>5 fresh puzzles every day at midnight</p>
-          {/* Viewing a previous day (e.g. a reopened tab with a stale ?d=
-              param): offer a way back to the current day. Locked mid-game
-              like every other exit. */}
-          {dateStr < today && (
-            <p>
-              {gameState === "playing" ? (
-                <span
-                  title="Finish the current game first"
-                  className="underline opacity-40 cursor-not-allowed"
-                >
-                  ← Back to today&apos;s puzzles
-                </span>
-              ) : (
-                <Link href="/" className="underline hover:text-gray-700 dark:hover:text-gray-300">
-                  ← Back to today&apos;s puzzles
-                </Link>
-              )}
-            </p>
-          )}
           <p>
             {gameState === "playing" ? (
               <span
