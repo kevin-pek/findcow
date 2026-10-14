@@ -16,7 +16,6 @@ import {
   saveKey,
   validatePuzzleForSlot,
 } from "@/lib/puzzle";
-import AdUnit from "./AdUnit";
 
 type CellPosition = {
   row: number;
@@ -454,13 +453,6 @@ export default function WordSearchGame({ dateStr, slot }: WordSearchGameProps) {
   return (
     <div className="flex flex-col items-center justify-center h-auto p-4 select-none">
       <div className="w-full max-w-md">
-        {/* Top Ad - visible on idle/start screen */}
-        {gameState === "idle" && (
-          <div className="mb-4">
-            <AdUnit format="horizontal" className="min-h-[50px]" />
-          </div>
-        )}
-
         {/* Header */}
         <div className="text-center mb-6">
           <h1 className="text-3xl md:text-4xl font-bold mb-2">
@@ -587,7 +579,9 @@ export default function WordSearchGame({ dateStr, slot }: WordSearchGameProps) {
         <div className="relative mx-auto mb-6" style={{ maxWidth: "min(100%, 400px)" }}>
           <div
             ref={gridRef}
-            className={`grid gap-1 md:gap-2 touch-none ${isDisabled || isPaused ? "opacity-50" : ""}`}
+            // Only capture touch gestures while playing; otherwise let swipes
+            // scroll the page normally over the inactive grid.
+            className={`grid gap-1 md:gap-2 ${gameState === "playing" ? "touch-none" : "touch-pan-y"} ${isDisabled || isPaused ? "opacity-50" : ""}`}
             style={{
               gridTemplateColumns: `repeat(${puzzle.size}, minmax(0, 1fr))`,
             }}
