@@ -44,6 +44,20 @@ function markProgress(dateStr: string, slot: Slot, elapsedSec: number) {
   }
 }
 
+// All 5 slots cleared for a date. Read during render only on the win screen,
+// which always renders post-mount (gameState comes from effects), so there is
+// no SSR/hydration mismatch from touching localStorage here.
+function isDayComplete(dateStr: string): boolean {
+  try {
+    const raw = localStorage.getItem(progressKey(dateStr));
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as Record<string, number>;
+    return [1, 2, 3, 4, 5].every((s) => parsed[String(s)] != null);
+  } catch {
+    return false;
+  }
+}
+
 // Short confetti celebration on a fresh win. Skipped for users who prefer
 // reduced motion. Fired from the win handler only — never on reloads.
 function celebrate() {
@@ -482,6 +496,9 @@ export default function WordSearchGame({ dateStr, slot }: WordSearchGameProps) {
   const next = nextDateSlot(dateStr, safeSlot);
   const hasNext = next.dateStr <= today;
   const isLastToday = dateStr === today && safeSlot === 5;
+  // Today's whole set cleared: no point offering Next into done puzzles.
+  // (Archive dates keep chaining forward for the catch-up flow.)
+  const clearedToday = dateStr === today && isDayComplete(dateStr);
 
   return (
     <div className="flex flex-col items-center justify-center h-auto p-4 select-none">
@@ -757,14 +774,14 @@ export default function WordSearchGame({ dateStr, slot }: WordSearchGameProps) {
             >
               Share Result 🐮
             </button>
-            {hasNext ? (
+            {hasNext && !clearedToday ? (
               <Link
                 href={`/?d=${next.dateStr}&c=${next.slot}`}
                 className="block w-full py-3 px-6 bg-gray-800 hover:bg-gray-900 text-white font-semibold rounded-lg transition-colors text-center"
               >
                 Next Cow →
               </Link>
-            ) : isLastToday ? (
+            ) : isLastToday || clearedToday ? (
               <Link
                 href="/archive"
                 className="block w-full py-3 px-6 bg-gray-800 hover:bg-gray-900 text-white font-semibold rounded-lg transition-colors text-center"
@@ -778,6 +795,25 @@ export default function WordSearchGame({ dateStr, slot }: WordSearchGameProps) {
         {/* Footer */}
         <div className="text-center mt-4 text-xs text-gray-500 dark:text-gray-500 space-y-1">
           <p>5 fresh puzzles every day at midnight</p>
+          {/* Viewing a previous day (e.g. a reopened tab with a stale ?d=
+              param): offer a way back to the current day. Locked mid-game
+              like every other exit. */}
+          {dateStr < today && (
+            <p>
+              {gameState === "playing" ? (
+                <span
+                  title="Finish the current game first"
+                  className="underline opacity-40 cursor-not-allowed"
+                >
+                  ← Back to today&apos;s puzzles
+                </span>
+              ) : (
+                <Link href="/" className="underline hover:text-gray-700 dark:hover:text-gray-300">
+                  ← Back to today&apos;s puzzles
+                </Link>
+              )}
+            </p>
+          )}
           <p>
             {gameState === "playing" ? (
               <span
